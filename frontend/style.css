@@ -1,0 +1,8 @@
+body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+header { background:#2b7a78; color: #fff; padding: 12px 20px; display:flex; justify-content:space-between; align-items:center; }
+header a { color: #fff; margin-left: 10px; text-decoration:none; }
+main { padding: 16px; }
+#resource-list { margin-top: 16px; }
+#resources li { margin-bottom: 8px; }
+form label { display:block; margin:6px 0; }
+button { padding: 6px 10px; }

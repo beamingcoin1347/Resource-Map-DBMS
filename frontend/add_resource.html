@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Add Resource</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Add Resource</h1>
+    <nav><a href="index.html">Home</a></nav>
+  </header>
+  <main>
+    <form id="resourceForm">
+      <label>Name: <input type="text" name="name" required></label><br>
+      <label>Category: <input type="text" name="category"></label><br>
+      <label>Address: <input type="text" name="address"></label><br>
+      <label>Latitude: <input type="number" step="any" name="latitude"></label><br>
+      <label>Longitude: <input type="number" step="any" name="longitude"></label><br>
+      <label>Contact: <input type="text" name="contact"></label><br>
+      <label>Description: <textarea name="description"></textarea></label><br>
+      <button type="submit">Add Resource</button>
+    </form>
+    <hr>
+    <h3>Quick Add: Use current location</h3>
+    <button id="useLocation">Use My Location</button>
+  </main>
+  <script>
+    const form = document.getElementById("resourceForm");
+    form.addEventListener("submit", async e => {
+      e.preventDefault();
+      const data = Object.fromEntries(new FormData(form).entries());
+      for (let k in data) if (data[k] === "") data[k] = null;
+      const res = await fetch("/api/resource", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+      const json = await res.json();
+      alert(json.message || JSON.stringify(json));
+      if (res.ok) window.location = "/";
+    });
+
+    document.getElementById("useLocation").addEventListener("click", () => {
+      if (!navigator.geolocation) { alert("Geolocation not supported"); return; }
+      navigator.geolocation.getCurrentPosition(pos => {
+        form.latitude.value = pos.coords.latitude;
+        form.longitude.value = pos.coords.longitude;
+      }, () => alert("Permission denied or unavailable"));
+    });
+  </script>
+</body>
+</html>
