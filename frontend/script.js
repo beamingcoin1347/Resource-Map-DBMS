@@ -110,6 +110,7 @@
               <button class="btn btn-sm btn-outline-secondary mb-1 viewBtn" data-id="${id}" title="Reviews"><i class="fa-solid fa-comment-dots"></i></button>
               <button class="btn btn-sm btn-outline-secondary mb-1 eventsBtn" data-id="${id}" title="Events"><i class="fa-solid fa-calendar-days"></i></button>
               <button class="btn btn-sm btn-outline-secondary mb-1 verifyBtn" data-id="${id}" title="Verify"><i class="fa-solid fa-check"></i></button>
+              
             </div>
           </div>
         </div>`;
@@ -118,6 +119,9 @@
     container.querySelectorAll(".viewBtn").forEach(b => b.addEventListener("click", ev => openReviews(ev.currentTarget.dataset.id)));
     container.querySelectorAll(".eventsBtn").forEach(b => b.addEventListener("click", ev => openEvents(ev.currentTarget.dataset.id)));
     container.querySelectorAll(".verifyBtn").forEach(b => b.addEventListener("click", ev => doVerify(ev.currentTarget.dataset.id)));
+    container.querySelectorAll(".deleteBtn").forEach(b => b.addEventListener("click", ev => {const id = ev.currentTarget.dataset.id; deleteResourceUI(id);
+}));
+
   }
 
   function clearMarkers(){ markersLayer.clearLayers(); }
@@ -162,6 +166,40 @@
     }
     reviewsModal.show();
   }
+
+  async function deleteResourceUI(id) {
+    if (!id) return alert("No resource id provided");
+    const confirmed = confirm("Are you sure you want to delete this resource? This will remove its reviews and events as well.");
+    if (!confirmed) return;
+
+  // Prompt for admin token (if you don't want to require a token, leave blank to cancel)
+    const token = prompt("Enter admin token to confirm deletion (required). Leave blank to cancel:");
+    if (!token) {
+      alert("Delete cancelled (admin token required).");
+      return;
+  }
+
+  try {
+    const res = await fetch(`/api/resource/${id}`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        "X-ADMIN-TOKEN": token
+      }
+    });
+    const data = await res.json();
+    if (res.ok) {
+      alert(data.message || "Deleted successfully");
+      await loadResources();
+    } else {
+      alert(data.error || data.message || "Delete failed");
+      console.error("Delete failed:", data);
+    }
+  } catch (err) {
+    console.error("Network error deleting resource:", err);
+    alert("Network error while deleting resource");
+  }
+}
 
   reviewForm?.addEventListener("submit", async (ev)=> {
     ev.preventDefault();
@@ -245,6 +283,7 @@
       navigator.geolocation.getCurrentPosition(p => map.setView([p.coords.latitude,p.coords.longitude],14), ()=> alert("Failed to get location"));
     });
   }
+  
 
   // init
   document.addEventListener("DOMContentLoaded", async () => {
