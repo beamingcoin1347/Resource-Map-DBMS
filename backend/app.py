@@ -330,99 +330,25 @@ def verify_resource(rid):
         logger.exception("verify_resource failed")
         return jsonify({"error":"server"}), 500
 
-# Delete
-# SAFER DELETE (replace your previous delete endpoint)
-import shutil
-from datetime import datetime
-
-def _backup_file(path):
-    try:
-        if os.path.exists(path):
-            ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-            bak = f"{path}.bak.{ts}"
-            shutil.copy2(path, bak)
-            app.logger.info("Backup created: %s", bak)
-            return bak
-    except Exception:
-        app.logger.exception("Backup failed for %s", path)
-    return None
-
+# --- Delete endpoints (optional) ---
 @app.route("/api/resource/<rid>", methods=["DELETE"])
 def delete_resource(rid):
-    """Safer delete: ensure item exists, backup local files, remove related reviews/events"""
     try:
-        # --- MongoDB mode ---
         if resources_col is not None:
-            # check resource exists
             try:
-                res_doc = resources_col.find_one({"_id": ObjectId(rid)})
+                res = resources_col.delete_one({"_id": ObjectId(rid)})
             except Exception:
-                return jsonify({"error": "Invalid resource id"}), 400
-            if not res_doc:
-                return jsonify({"error": "Resource not found"}), 404
-
-            # delete resource and related docs
-            resources_col.delete_one({"_id": ObjectId(rid)})
-            if reviews_col is not None:
-                reviews_col.delete_many({"resource_id": rid})
-            if events_col is not None:
-                events_col.delete_many({"resource_id": rid})
-            return jsonify({"message": "Resource and related items deleted (MongoDB)"}), 200
-
-        # --- Local fallback mode ---
-        # backup files first
-        res_path = os.path.join(os.path.dirname(__file__), "data", "resources.json")
-        rev_path = os.path.join(os.path.dirname(__file__), "data", "reviews.json")
-        evt_path = os.path.join(os.path.dirname(__file__), "data", "events.json")
-        _backup_file(res_path)
-        _backup_file(rev_path)
-        _backup_file(evt_path)
-
-        # load resources
-        resources = []
-        if os.path.exists(res_path):
-            with open(res_path, "r", encoding="utf8") as f:
-                resources = json.load(f)
-
-        # find and remove resource by either id or _id
-        found = False
-        new_resources = []
-        for r in resources:
-            rid_val = str(r.get("id") or r.get("_id") or r.get("_Id") or "")
-            if rid_val == rid:
-                found = True
-                continue
-            new_resources.append(r)
-
-        if not found:
-            return jsonify({"error": "Resource not found (local)"}), 404
-
-        # write back resources
-        with open(res_path, "w", encoding="utf8") as f:
-            json.dump(new_resources, f, ensure_ascii=False, indent=2)
-
-        # also remove related reviews and events
-        # reviews
-        if os.path.exists(rev_path):
-            with open(rev_path, "r", encoding="utf8") as f:
-                reviews = json.load(f)
-            reviews = [rv for rv in reviews if str(rv.get("resource_id") or "") != rid]
-            with open(rev_path, "w", encoding="utf8") as f:
-                json.dump(reviews, f, ensure_ascii=False, indent=2)
-        # events
-        if os.path.exists(evt_path):
-            with open(evt_path, "r", encoding="utf8") as f:
-                events = json.load(f)
-            events = [ev for ev in events if str(ev.get("resource_id") or "") != rid]
-            with open(evt_path, "w", encoding="utf8") as f:
-                json.dump(events, f, ensure_ascii=False, indent=2)
-
-        return jsonify({"message": "Resource and related items deleted (local)"}), 200
-
-    except Exception as e:
-        app.logger.exception("delete_resource failed")
-        return jsonify({"error": "server error", "details": str(e)}), 500
-
+                return jsonify({"error":"Invalid id"}), 400
+            if res.deleted_count:
+                return jsonify({"message":"Deleted"}), 200
+            return jsonify({"error":"Not found"}), 404
+        else:
+            local_resources[:] = [r for r in (local_resources or []) if not (r.get("id")==rid or r.get("_id")==rid)]
+            save_local(LOCAL_RESOURCE_FILE, local_resources)
+            return jsonify({"message":"Deleted (local)"}), 200
+    except Exception:
+        logger.exception("delete_resource failed")
+        return jsonify({"error":"server"}), 500
 
 if __name__ == "__main__":
     try:
