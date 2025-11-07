@@ -5,60 +5,34 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Community Resource Map</title>
 
-  <!-- Bootstrap 5 CSS -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-
-  <!-- Leaflet -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-
-  <!-- Icons -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
 
   <style>
-    :root{
-      --accent:#2b7a78;
-      --accent-2:#17252a;
-    }
-    body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:#f7f9fb; }
-    .navbar-brand { font-weight:700; color:white }
-    #map { height: calc(100vh - 64px); min-height: 420px; border-left: 1px solid #e6eef7; }
-    .sidebar { height: calc(100vh - 64px); overflow:auto; padding: 1rem; background: #fff; border-right: 1px solid #e6eef7; }
-    .resource-card { cursor: pointer; transition: transform .08s ease; }
-    .resource-card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(20,30,60,0.06); }
-    .small-muted { color: #6c757d; font-size: .88rem; }
-    .map-controls { position:absolute; top:78px; right:12px; z-index:1000; }
-    .leaflet-container { background: #eaeef2; }
-    .no-results { color:#666; padding:1rem; text-align:center; }
-    .btn-accent { background: var(--accent); color: white; border: none; }
-    .btn-accent:hover { background: #215b57; }
-    @media (max-width: 992px) {
-      #map { height: 55vh; }
-      .sidebar { height: auto; }
-    }
+    :root{--accent:#2b7a78;--accent-2:#17252a}
+    body{font-family:Inter,system-ui,Arial;background:#f7f9fb;margin:0}
+    .navbar-brand{font-weight:700;color:white}
+    #map{height:calc(100vh - 64px);min-height:420px;border-left:1px solid #e6eef7}
+    .sidebar{height:calc(100vh - 64px);overflow:auto;padding:1rem;background:#fff;border-right:1px solid #e6eef7}
+    .resource-card{cursor:pointer;transition:transform .08s ease}
+    .resource-card:hover{transform:translateY(-3px);box-shadow:0 6px 20px rgba(20,30,60,0.06)}
+    .small-muted{color:#6c757d;font-size:.88rem}
+    .btn-accent{background:var(--accent);color:white;border:none}
   </style>
 </head>
 <body>
-  <!-- NAV -->
-  <nav class="navbar navbar-expand-lg" style="background:var(--accent-2);">
+  <nav class="navbar navbar-expand-lg" style="background:var(--accent-2)">
     <div class="container-fluid">
-      <a class="navbar-brand d-flex align-items-center" href="#">
-        <i class="fa-solid fa-location-dot me-2"></i>
-        Community Resource Map
-      </a>
+      <a class="navbar-brand d-flex align-items-center" href="#"><i class="fa-solid fa-location-dot me-2"></i>Community Resource Map</a>
       <div class="d-flex gap-2">
-        <button id="locateBtn" class="btn btn-outline-light btn-sm" title="Go to my location">
-          <i class="fa-solid fa-location-crosshairs"></i> My location
-        </button>
-        <button id="openAddBtn" class="btn btn-accent btn-sm" data-bs-toggle="modal" data-bs-target="#addModal">
-          <i class="fa-solid fa-plus me-1"></i> Add resource
-        </button>
+        <button id="locateBtn" class="btn btn-outline-light btn-sm" title="Go to my location"><i class="fa-solid fa-location-crosshairs"></i> My location</button>
+        <button id="openAddBtn" class="btn btn-accent btn-sm" data-bs-toggle="modal" data-bs-target="#addModal"><i class="fa-solid fa-plus me-1"></i> Add resource</button>
       </div>
     </div>
   </nav>
 
-  <!-- MAIN LAYOUT -->
   <div class="d-flex">
-    <!-- Sidebar -->
     <aside class="sidebar col-lg-4 col-md-5">
       <div class="mb-3">
         <div class="input-group">
@@ -70,26 +44,20 @@
       <div class="mb-3 d-flex gap-2 align-items-center">
         <select id="categoryFilter" class="form-select form-select-sm w-50">
           <option value="">All categories</option>
-          <option>Library</option>
-          <option>Hospital</option>
-          <option>Food</option>
-          <option>Shelter</option>
-          <option>Education</option>
+          <option>Library</option><option>Hospital</option><option>Food</option><option>Shelter</option><option>Education</option>
         </select>
-
         <button id="clearFilters" class="btn btn-sm btn-outline-secondary">Clear</button>
       </div>
 
       <div id="listContainer">
         <div id="list" class="row g-2"></div>
-        <div id="noResults" class="no-results d-none">No resources match your search.</div>
+        <div id="noResults" class="text-center text-muted d-none" style="padding:1rem">No resources match your search.</div>
       </div>
 
       <hr />
-      <div class="small-muted">Tip: click on the map to drop a marker, or use <strong>Add resource</strong>.</div>
+      <div class="small-muted">Tip: click on the map to autofill lat/lng, or use <strong>Add resource</strong>.</div>
     </aside>
 
-    <!-- Map -->
     <main id="map" class="flex-fill"></main>
   </div>
 
@@ -98,60 +66,64 @@
     <div class="modal-dialog modal-dialog-centered modal-lg">
       <div class="modal-content">
         <form id="addForm">
-          <div class="modal-header">
-            <h5 class="modal-title">Add new resource</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-          </div>
-
+          <div class="modal-header"><h5 class="modal-title">Add new resource</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
           <div class="modal-body">
             <div class="row g-2">
-              <div class="col-md-6">
-                <label class="form-label">Name *</label>
-                <input name="name" class="form-control" required />
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Category</label>
-                <input name="category" class="form-control" placeholder="e.g., Hospital, Library" />
-              </div>
-              <div class="col-12">
-                <label class="form-label">Address</label>
-                <input name="address" class="form-control" />
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Latitude *</label>
-                <input name="latitude" class="form-control" required />
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Longitude *</label>
-                <input name="longitude" class="form-control" required />
-              </div>
-              <div class="col-md-6">
-                <label class="form-label">Contact</label>
-                <input name="contact" class="form-control" />
-              </div>
-              <div class="col-12">
-                <label class="form-label">Description</label>
-                <textarea name="description" rows="2" class="form-control"></textarea>
-              </div>
-              <div class="col-12 small-muted mt-2">
-                You can also click on the map to autofill latitude/longitude, or use <em>My location</em>.
-              </div>
+              <div class="col-md-6"><label class="form-label">Name *</label><input name="name" class="form-control" required /></div>
+              <div class="col-md-6"><label class="form-label">Category</label><input name="category" class="form-control" /></div>
+              <div class="col-12"><label class="form-label">Address</label><input name="address" class="form-control" /></div>
+              <div class="col-md-6"><label class="form-label">Latitude *</label><input name="latitude" class="form-control" required /></div>
+              <div class="col-md-6"><label class="form-label">Longitude *</label><input name="longitude" class="form-control" required /></div>
+              <div class="col-md-6"><label class="form-label">Contact</label><input name="contact" class="form-control" /></div>
+              <div class="col-12"><label class="form-label">Description</label><textarea name="description" rows="2" class="form-control"></textarea></div>
+              <div class="col-12 small-muted mt-2">Click on map to autofill coordinates.</div>
             </div>
           </div>
-
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-            <button id="submitAdd" type="submit" class="btn btn-accent">Add resource</button>
-          </div>
+          <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button id="submitAdd" type="submit" class="btn btn-accent">Add resource</button></div>
         </form>
       </div>
     </div>
   </div>
 
-  <!-- Map controls container placeholder -->
-  <div class="map-controls"></div>
+  <!-- Reviews Modal -->
+  <div class="modal fade" id="reviewsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-md">
+      <div class="modal-content">
+        <div class="modal-header"><h5 id="reviewsTitle" class="modal-title">Reviews</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div id="reviewsList" style="max-height:40vh;overflow:auto"></div>
+          <hr />
+          <form id="reviewForm">
+            <div class="mb-2"><input name="user_name" class="form-control" placeholder="Your name" /></div>
+            <div class="mb-2"><select name="rating" class="form-select"><option value="5">5 - Excellent</option><option value="4">4</option><option value="3">3</option><option value="2">2</option><option value="1">1 - Poor</option></select></div>
+            <div class="mb-2"><textarea name="comment" rows="2" class="form-control" placeholder="Comment (optional)"></textarea></div>
+            <div class="text-end"><button class="btn btn-accent" type="submit">Submit review</button></div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
 
-  <!-- Scripts -->
+  <!-- Events Modal -->
+  <div class="modal fade" id="eventsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-md">
+      <div class="modal-content">
+        <div class="modal-header"><h5 id="eventsTitle" class="modal-title">Events</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <div id="eventsList" style="max-height:40vh;overflow:auto"></div>
+          <hr />
+          <form id="eventForm">
+            <input type="text" name="title" class="form-control mb-2" placeholder="Event title" required />
+            <input type="date" name="date" class="form-control mb-2" required />
+            <input type="time" name="time" class="form-control mb-2" />
+            <textarea name="description" class="form-control mb-2" placeholder="Short description"></textarea>
+            <div class="text-end"><button class="btn btn-accent" type="submit">Add event</button></div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script src="script.js"></script>

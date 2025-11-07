@@ -1,7 +1,12 @@
-/* improved script.js — robust loading, debounce search, spinner & count */
+// frontend/script.js
 (() => {
   const API_RESOURCES = "/api/resources";
   const API_ADD = "/api/resource";
+  const API_REVIEWS_LIST = id => `/api/resource/${id}/reviews`;
+  const API_ADD_REVIEW = id => `/api/resource/${id}/review`;
+  const API_EVENTS_LIST = id => `/api/resource/${id}/events`;
+  const API_ADD_EVENT = id => `/api/resource/${id}/event`;
+  const API_VERIFY = id => `/api/resource/${id}/verify`;
 
   // DOM refs
   const listEl = () => document.getElementById("list");
@@ -10,150 +15,238 @@
   const searchBtn = document.getElementById("searchBtn");
   const categoryFilter = document.getElementById("categoryFilter");
   const clearFilters = document.getElementById("clearFilters");
+  const addForm = document.getElementById("addForm");
+  const reviewForm = document.getElementById("reviewForm");
+  const reviewsList = document.getElementById("reviewsList");
+  const reviewsModal = new bootstrap.Modal(document.getElementById("reviewsModal"));
+  const eventsModal = new bootstrap.Modal(document.getElementById("eventsModal"));
+  const eventsList = document.getElementById("eventsList");
+  const eventForm = document.getElementById("eventForm");
   const locateBtn = document.getElementById("locateBtn");
-  const openAddBtn = document.getElementById("openAddBtn");
 
-  let map, markersLayer, allResources = [];
-
-  function setLoading(on) {
-    const sidebar = document.querySelector('.sidebar');
-    if (on) {
-      sidebar.style.opacity = 0.6;
-    } else {
-      sidebar.style.opacity = 1;
-    }
-  }
-
-  function debounce(fn, wait=300){
-    let t;
-    return (...args) => {
-      clearTimeout(t);
-      t = setTimeout(()=>fn(...args), wait);
-    };
-  }
+  let map, markersLayer, allResources = [], activeResourceId = null, activeEventResourceId = null;
 
   function initMap(){
-    map = L.map("map", { zoomControl:true }).setView([13.0827,80.2707], 12);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:19 }).addTo(map);
+    map = L.map("map").setView([13.0827, 80.2707], 12);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
     markersLayer = L.layerGroup().addTo(map);
+
     map.on("click", e => {
       const lat = e.latlng.lat.toFixed(6), lng = e.latlng.lng.toFixed(6);
-      // if modal open fill fields
       const latInput = document.querySelector("input[name='latitude']");
       const lngInput = document.querySelector("input[name='longitude']");
-      if (latInput && document.getElementById('addModal')?.classList.contains('show')){
+      if (latInput && document.getElementById("addModal").classList.contains("show")) {
         latInput.value = lat; lngInput.value = lng;
+      } else {
+        L.popup().setLatLng(e.latlng).setContent(`<div style="min-width:180px">Coordinates:<br/><strong>${lat}, ${lng}</strong><div style="margin-top:6px"><button id="useCoordBtn" class="btn btn-sm btn-accent">Use in form</button></div></div>`).openOn(map);
+        setTimeout(()=> {
+          const b = document.getElementById("useCoordBtn");
+          if (b) {
+            b.addEventListener("click", () => {
+              const bs = new bootstrap.Modal(document.getElementById("addModal"));
+              bs.show();
+              document.querySelector("input[name='latitude']").value = lat;
+              document.querySelector("input[name='longitude']").value = lng;
+              map.closePopup();
+            });
+          }
+        }, 10);
       }
     });
   }
 
-  async function loadResources(){
-    setLoading(true);
+  async function loadResources() {
+    const q = searchInput.value.trim();
+    const cat = categoryFilter.value;
+    const params = new URLSearchParams();
+    if (cat) params.set("category", cat);
+    if (q) params.set("q", q);
     try {
-      const res = await fetch(API_RESOURCES);
-      if (!res.ok) throw new Error("Network response not ok");
-      const json = await res.json();
-      allResources = Array.isArray(json) ? json : [];
+      const res = await fetch(API_RESOURCES + (params.toString() ? "?" + params.toString() : ""));
+      const data = await res.json();
+      allResources = Array.isArray(data) ? data : [];
       renderResources(allResources);
       placeMarkers(allResources);
     } catch (e) {
-      console.error("loadResources failed", e);
-      listEl().innerHTML = "<div class='no-results'>Failed to load resources</div>";
-      noResultsEl().classList.add("d-none");
-    } finally {
-      setLoading(false);
+      console.error(e);
+      listEl().innerHTML = "<div class='text-muted p-3'>Failed to load resources</div>";
     }
-  }
-
-  function renderResources(arr){
-    const container = listEl();
-    container.innerHTML = "";
-    if (!arr.length) {
-      noResultsEl().classList.remove("d-none");
-      return;
-    }
-    noResultsEl().classList.add("d-none");
-    arr.forEach(r => {
-      const div = document.createElement("div");
-      div.className = "col-12";
-      div.innerHTML = `
-        <div class="p-3 resource-card rounded">
-          <div style="font-weight:600">${escapeHtml(r.name || "Untitled")}</div>
-          <div class="small-muted">${escapeHtml(r.category || "")} ${r.address? " • " + escapeHtml(r.address): ""}</div>
-        </div>`;
-      div.addEventListener("click", ()=> {
-        if (r.latitude && r.longitude) map.setView([parseFloat(r.latitude), parseFloat(r.longitude)], 15);
-      });
-      container.appendChild(div);
-    });
-  }
-
-  function clearMarkers(){
-    markersLayer.clearLayers();
-  }
-
-  function placeMarkers(arr){
-    clearMarkers();
-    arr.forEach(r => {
-      if (!r.latitude || !r.longitude) return;
-      const lat = Number(r.latitude), lon = Number(r.longitude);
-      if (!isFinite(lat) || !isFinite(lon)) return;
-      const mk = L.marker([lat, lon]).addTo(markersLayer);
-      mk.bindPopup(`<strong>${escapeHtml(r.name||"")}</strong><br/><small>${escapeHtml(r.address||"")}</small>`);
-    });
-  }
-
-  function applyFilters(){
-    const q = (searchInput.value || "").trim().toLowerCase();
-    const cat = (categoryFilter.value || "").trim().toLowerCase();
-    const filtered = allResources.filter(r => {
-      const name = (r.name||"").toLowerCase();
-      const addr = (r.address||"").toLowerCase();
-      const rc = (r.category||"").toLowerCase();
-      const okQ = !q || name.includes(q) || addr.includes(q);
-      const okC = !cat || rc === cat;
-      return okQ && okC;
-    });
-    renderResources(filtered);
-    placeMarkers(filtered);
   }
 
   function escapeHtml(s){ return (s||"").toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m])); }
 
-  async function submitAddForm(ev){
-    ev.preventDefault();
-    const form = ev.target;
-    const data = Object.fromEntries(new FormData(form).entries());
-    if (!data.name || !data.latitude || !data.longitude){ alert("Please enter name, latitude and longitude"); return; }
-    data.latitude = Number(data.latitude); data.longitude = Number(data.longitude);
-    try {
-      const r = await fetch(API_ADD, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(data) });
-      const out = await r.json();
-      if (r.ok){ 
-        bootstrap.Modal.getInstance(document.getElementById("addModal")).hide();
-        form.reset(); 
-        await loadResources();
-      } else {
-        alert(out.error || out.message || "Failed to add resource");
-      }
-    } catch (e) {
-      console.error(e);
-      alert("Network error while adding resource");
+  function renderStars(avg){
+    if (avg === null || avg === undefined) return "";
+    const a = Math.round(avg * 2) / 2;
+    let out = "";
+    for (let i=1;i<=5;i++){
+      if (i <= Math.floor(a)) out += '<i class="fa-solid fa-star" style="color:#f5c518"></i>';
+      else if (i - 0.5 === a) out += '<i class="fa-solid fa-star-half-stroke" style="color:#f5c518"></i>';
+      else out += '<i class="fa-regular fa-star" style="color:#ddd"></i>';
     }
+    out += ` <span class="small-muted">(${Number(avg).toFixed(1)})</span>`;
+    return out;
   }
 
-  function attachUI(){
-    document.getElementById("addForm").addEventListener("submit", submitAddForm);
-    document.getElementById("searchBtn").addEventListener("click", applyFilters);
-    searchInput.addEventListener("input", debounce(applyFilters, 300));
-    categoryFilter.addEventListener("change", applyFilters);
-    clearFilters.addEventListener("click", ()=>{ searchInput.value=""; categoryFilter.value=""; applyFilters(); });
-    locateBtn.addEventListener("click", ()=> {
-      if (!navigator.geolocation) return alert("Geolocation not supported");
-      navigator.geolocation.getCurrentPosition(p => { map.setView([p.coords.latitude, p.coords.longitude], 14); }, ()=> alert("Failed to get location"));
+  function renderResources(arr) {
+    const container = listEl();
+    container.innerHTML = "";
+    if (!arr.length) { noResultsEl().classList.remove("d-none"); return; }
+    noResultsEl().classList.add("d-none");
+    arr.forEach(r => {
+      const col = document.createElement("div"); col.className = "col-12";
+      const rating = renderStars(r.avg_rating);
+      const verified = r.verified ? '<span class="badge bg-success ms-2">Verified</span>' : '';
+      const id = r.id || r._id || r.id;
+      col.innerHTML = `
+        <div class="p-3 resource-card rounded">
+          <div class="d-flex justify-content-between">
+            <div>
+              <div style="font-weight:600">${escapeHtml(r.name || "")} ${verified}</div>
+              <div class="small-muted">${escapeHtml(r.category || "")} ${r.address ? " • " + escapeHtml(r.address) : ""}</div>
+              <div class="small-muted mt-1">${rating}</div>
+            </div>
+            <div class="text-end">
+              <button class="btn btn-sm btn-outline-secondary mb-1 viewBtn" data-id="${id}" title="Reviews"><i class="fa-solid fa-comment-dots"></i></button>
+              <button class="btn btn-sm btn-outline-secondary mb-1 eventsBtn" data-id="${id}" title="Events"><i class="fa-solid fa-calendar-days"></i></button>
+              <button class="btn btn-sm btn-outline-secondary mb-1 verifyBtn" data-id="${id}" title="Verify"><i class="fa-solid fa-check"></i></button>
+            </div>
+          </div>
+        </div>`;
+      container.appendChild(col);
+    });
+    container.querySelectorAll(".viewBtn").forEach(b => b.addEventListener("click", ev => openReviews(ev.currentTarget.dataset.id)));
+    container.querySelectorAll(".eventsBtn").forEach(b => b.addEventListener("click", ev => openEvents(ev.currentTarget.dataset.id)));
+    container.querySelectorAll(".verifyBtn").forEach(b => b.addEventListener("click", ev => doVerify(ev.currentTarget.dataset.id)));
+  }
+
+  function clearMarkers(){ markersLayer.clearLayers(); }
+
+  function placeMarkers(arr){
+    clearMarkers();
+    arr.forEach(r => {
+      const lat = Number(r.latitude);
+      const lon = Number(r.longitude);
+      if (!isFinite(lat) || !isFinite(lon)) return;
+      const marker = L.marker([lat, lon]).addTo(markersLayer);
+      const avg = r.avg_rating ? ` — ${Number(r.avg_rating).toFixed(1)} ★` : "";
+      const id = r.id || r._id;
+      marker.bindPopup(`<strong>${escapeHtml(r.name||"")}</strong><br/><small>${escapeHtml(r.address||"") || ""}${avg}</small><br/><div style="margin-top:6px"><button class="btn btn-sm btn-outline-primary popupReviews" data-id="${id}">Reviews</button> <button class="btn btn-sm btn-outline-primary popupEvents" data-id="${id}">Events</button></div>`, {maxWidth:250});
+      marker.on("popupopen", (e) => {
+        setTimeout(()=> {
+          const b = document.querySelector(".popupReviews");
+          if (b) b.addEventListener("click", ()=> openReviews(b.dataset.id));
+          const ebtn = document.querySelector(".popupEvents");
+          if (ebtn) ebtn.addEventListener("click", ()=> openEvents(ebtn.dataset.id));
+        }, 10);
+      });
     });
   }
 
+  // Reviews
+  async function openReviews(id) {
+    activeResourceId = id;
+    document.getElementById("reviewsTitle").textContent = "Reviews";
+    reviewsList.innerHTML = "<div class='small-muted p-2'>Loading...</div>";
+    reviewForm.reset();
+    try {
+      const res = await fetch(API_REVIEWS_LIST(id));
+      const data = await res.json();
+      if (!Array.isArray(data) || !data.length) {
+        reviewsList.innerHTML = "<div class='small-muted p-2'>No reviews yet.</div>";
+      } else {
+        reviewsList.innerHTML = data.map(r => `<div class="mb-2"><strong>${escapeHtml(r.user_name||'Anonymous')}</strong> <span class="small-muted"> - ${new Date((r.created_at||0)*1000).toLocaleString()}</span><div>${renderStars(r.rating)}</div><div class="small-muted">${escapeHtml(r.comment||'')}</div></div>`).join("");
+      }
+    } catch (e) {
+      console.error(e); reviewsList.innerHTML = "<div class='text-danger p-2'>Failed to load reviews</div>";
+    }
+    reviewsModal.show();
+  }
+
+  reviewForm?.addEventListener("submit", async (ev)=> {
+    ev.preventDefault();
+    if (!activeResourceId) return alert("No resource selected");
+    const fm = new FormData(reviewForm);
+    const body = Object.fromEntries(fm.entries());
+    try {
+      const res = await fetch(API_ADD_REVIEW(activeResourceId), {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+      if (res.ok) {
+        alert("Review added"); reviewsModal.hide(); await loadResources();
+      } else {
+        const out = await res.json(); alert(out.error || out.message || "Failed to add review");
+      }
+    } catch (e) { console.error(e); alert("Network error"); }
+  });
+
+  // Events
+  async function openEvents(id) {
+    activeEventResourceId = id;
+    document.getElementById("eventsTitle").textContent = "Events";
+    eventsList.innerHTML = "<div class='small-muted p-2'>Loading...</div>";
+    eventForm.reset();
+    try {
+      const res = await fetch(API_EVENTS_LIST(id));
+      const data = await res.json();
+      if (!Array.isArray(data) || !data.length) {
+        eventsList.innerHTML = "<div class='small-muted p-2'>No upcoming events.</div>";
+      } else {
+        data.sort((a,b) => (a.date||"").localeCompare(b.date||""));
+        eventsList.innerHTML = data.map(ev => `<div class="mb-2"><strong>${escapeHtml(ev.title)}</strong> <span class="small-muted"> — ${escapeHtml(ev.date || '')} ${ev.time ? '@ '+escapeHtml(ev.time) : ''}</span><div class="small-muted">${escapeHtml(ev.description||'')}</div></div>`).join("");
+      }
+    } catch (e) {
+      console.error(e); eventsList.innerHTML = "<div class='text-danger p-2'>Failed to load events</div>";
+    }
+    eventsModal.show();
+  }
+
+  eventForm?.addEventListener("submit", async (ev)=> {
+    ev.preventDefault();
+    if (!activeEventResourceId) return alert("No resource selected");
+    const body = Object.fromEntries(new FormData(eventForm).entries());
+    try {
+      const res = await fetch(API_ADD_EVENT(activeEventResourceId), {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+      if (res.ok) { alert("Event added"); await openEvents(activeEventResourceId); await loadResources(); }
+      else { const out = await res.json(); alert(out.error || out.message || "Failed to add event"); }
+    } catch (e) { console.error(e); alert("Network error while adding event"); }
+  });
+
+  // verify (admin token)
+  async function doVerify(id) {
+    const token = prompt("Enter admin token to verify this resource (leave blank to cancel):");
+    if (!token) return;
+    try {
+      const res = await fetch(API_VERIFY(id), {method:"POST", headers:{"X-ADMIN-TOKEN": token}});
+      if (res.ok) { alert("Resource verified"); await loadResources(); }
+      else { const out = await res.json(); alert(out.error||"Unauthorized"); }
+    } catch (e) { console.error(e); alert("Network error"); }
+  }
+
+  // Add resource
+  addForm?.addEventListener("submit", async (ev)=> {
+    ev.preventDefault();
+    const fm = new FormData(addForm);
+    const body = Object.fromEntries(fm.entries());
+    if (!body.name || !body.latitude || !body.longitude) return alert("Name and coordinates required");
+    try {
+      const res = await fetch(API_ADD, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+      if (res.ok) { alert("Added"); addForm.reset(); bootstrap.Modal.getInstance(document.getElementById("addModal")).hide(); await loadResources(); }
+      else { const out = await res.json(); alert(out.error||out.message||"Failed"); }
+    } catch (e) { console.error(e); alert("Network error"); }
+  });
+
+  // UI bindings
+  function attachUI(){
+    document.getElementById("searchBtn").addEventListener("click", loadResources);
+    searchInput.addEventListener("keyup", (e)=> { if (e.key==="Enter") loadResources(); });
+    categoryFilter.addEventListener("change", loadResources);
+    clearFilters.addEventListener("click", ()=> { searchInput.value=""; categoryFilter.value=""; loadResources(); });
+    locateBtn.addEventListener("click", ()=> {
+      if (!navigator.geolocation) return alert("Geolocation not supported");
+      navigator.geolocation.getCurrentPosition(p => map.setView([p.coords.latitude,p.coords.longitude],14), ()=> alert("Failed to get location"));
+    });
+  }
+
+  // init
   document.addEventListener("DOMContentLoaded", async () => {
     initMap();
     attachUI();
