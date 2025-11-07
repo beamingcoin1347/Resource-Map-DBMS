@@ -1,0 +1,5 @@
+flask
+flask-cors
+pymongo
+dnspython
+ "mongodb+srv://Shreyan_19:Shreyan19@communityresourcemap.nkvghvk.mongodb.net/?appName=CommunityResourceMap"

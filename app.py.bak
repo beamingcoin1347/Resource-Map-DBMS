@@ -1,143 +1,272 @@
+# app.py — upgraded backend with reviews, rating, category filter, verification
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from pymongo import MongoClient
 from bson.objectid import ObjectId
-import os
+import os, json, time, uuid, logging, sys
 
+logging.basicConfig(level=logging.INFO)
 app = Flask(__name__, static_folder="../frontend", static_url_path="/")
 CORS(app)
+logger = app.logger
 
-MONGO_URI = "mongodb+srv://Shreyan_19:Shreyan19@communityresourcemap.nkvghvk.mongodb.net/?appName=CommunityResourceMap"
-client = MongoClient(MONGO_URI)
+# CONFIG
+MONGO_URI =  "mongodb+srv://Shreyan_19:Shreyan19@communityresourcemap.nkvghvk.mongodb.net/?appName=CommunityResourceMap"
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "changeme")  # set a real token in env for verification
+
+# Try connect to MongoDB (Atlas if provided)
+client = None
 try:
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     client.admin.command("ping")
-except Exception:
-    # If DB not reachable, app still runs but DB operations will be unavailable
+    logger.info("MongoDB ping OK")
+except Exception as e:
+    logger.warning("MongoDB connection failed: %s", e)
     client = None
 
+# DB handles (None-safe)
 db = client["community_map"] if client is not None else None
 resources_col = db["resources"] if db is not None else None
 reviews_col = db["reviews"] if db is not None else None
 events_col = db["events"] if db is not None else None
 
+# Local file fallback (if Mongo unavailable)
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+LOCAL_RESOURCE_FILE = os.path.join(DATA_DIR, "resources.json")
+LOCAL_REVIEW_FILE = os.path.join(DATA_DIR, "reviews.json")
+
 def to_json(doc):
     if not doc:
         return None
-    doc = dict(doc)
-    doc["id"] = str(doc.pop("_id"))
-    return doc
+    d = dict(doc)
+    d["id"] = str(d.pop("_id"))
+    return d
+
+def load_local(path):
+    try:
+        if os.path.exists(path):
+            return json.loads(open(path, "r", encoding="utf8").read())
+    except Exception:
+        logger.exception("load_local failed for %s", path)
+    return []
+
+def save_local(path, obj):
+    try:
+        open(path, "w", encoding="utf8").write(json.dumps(obj, ensure_ascii=False, indent=2))
+        return True
+    except Exception:
+        logger.exception("save_local failed for %s", path)
+        return False
+
+# In-memory caches when using local files
+local_resources = load_local(LOCAL_RESOURCE_FILE) if resources_col is None else None
+local_reviews = load_local(LOCAL_REVIEW_FILE) if reviews_col is None else None
 
 @app.route("/")
 def serve_frontend():
-    return send_from_directory(app.static_folder, "index.html")
+    try:
+        return send_from_directory(app.static_folder, "index.html")
+    except Exception:
+        return "Frontend not found", 404
 
-@app.route("/api/resource", methods=["POST"])
-def add_resource():
-    data = request.json
-    if not data or "name" not in data:
-        return jsonify({"error": "Invalid data, 'name' required"}), 400
-    resource = {
-        "name": data.get("name"),
-        "category": data.get("category"),
-        "address": data.get("address"),
-        "latitude": data.get("latitude"),
-        "longitude": data.get("longitude"),
-        "contact": data.get("contact"),
-        "description": data.get("description")
-    }
-    if resources_col:
-        res = resources_col.insert_one(resource)
-        return jsonify({"message": "Resource added", "id": str(res.inserted_id)}), 201
-    return jsonify({"message": "DB not available; simulated add"}), 201
-
+# --- Resources: list (supports category filter & search) ---
 @app.route("/api/resources", methods=["GET"])
 def get_resources():
-    category = request.args.get("category")
-    query = {}
-    if category:
-        query["category"] = category
-    if resources_col:
-        docs = list(resources_col.find(query))
-        return jsonify([to_json(d) for d in docs]), 200
-    return jsonify([]), 200
+    try:
+        category = request.args.get("category")
+        q = request.args.get("q")  # search query optional
+        query = {}
+        if category:
+            query["category"] = category
+        if resources_col is not None:
+            docs = list(resources_col.find(query))
+            result = []
+            for d in docs:
+                # include avg rating if present
+                doc = dict(d)
+                doc["id"] = str(doc.pop("_id"))
+                result.append(doc)
+            # simple search filter in python if q provided
+            if q:
+                ql = q.lower()
+                result = [r for r in result if ql in (r.get("name","") + r.get("address","")).lower()]
+            return jsonify(result), 200
+        else:
+            # local fallback
+            result = local_resources or []
+            if category:
+                result = [r for r in result if r.get("category")==category]
+            if q:
+                ql = q.lower()
+                result = [r for r in result if ql in (r.get("name","") + r.get("address","")).lower()]
+            return jsonify(result), 200
+    except Exception:
+        logger.exception("get_resources failed")
+        return jsonify({"error":"server"}), 500
 
+# --- Add resource ---
+@app.route("/api/resource", methods=["POST"])
+def add_resource():
+    try:
+        data = request.json
+        if not data or "name" not in data:
+            return jsonify({"error":"Invalid data"}), 400
+        doc = {
+            "name": data.get("name"),
+            "category": data.get("category"),
+            "address": data.get("address"),
+            "latitude": data.get("latitude"),
+            "longitude": data.get("longitude"),
+            "contact": data.get("contact"),
+            "description": data.get("description"),
+            "verified": False,
+            "avg_rating": None,
+            "created_at": time.time()
+        }
+        if resources_col is not None:
+            res = resources_col.insert_one(doc)
+            return jsonify({"message":"Resource added", "id": str(res.inserted_id)}), 201
+        # local fallback
+        doc["_id"] = str(uuid.uuid4())
+        local_resources.append(doc)
+        save_local(LOCAL_RESOURCE_FILE, local_resources)
+        return jsonify({"message":"Resource added (local)", "id": doc["_id"]}), 201
+    except Exception:
+        logger.exception("add_resource failed")
+        return jsonify({"error":"server"}), 500
+
+# --- Get single resource ---
 @app.route("/api/resource/<rid>", methods=["GET"])
 def get_resource(rid):
     try:
-        doc = resources_col.find_one({"_id": ObjectId(rid)}) if resources_col else None
+        doc = None
+        if resources_col is not None:
+            try:
+                doc = resources_col.find_one({"_id": ObjectId(rid)})
+            except Exception:
+                return jsonify({"error":"Invalid id"}), 400
+            if not doc:
+                return jsonify({"error":"Not found"}), 404
+            return jsonify(to_json(doc)), 200
+        else:
+            for r in (local_resources or []):
+                if r.get("_id")==rid:
+                    return jsonify(r), 200
+            return jsonify({"error":"Not found"}), 404
     except Exception:
-        return jsonify({"error": "Invalid id"}), 400
-    if not doc:
-        return jsonify({"error": "Not found"}), 404
-    return jsonify(to_json(doc)), 200
+        logger.exception("get_resource failed")
+        return jsonify({"error":"server"}), 500
 
-@app.route("/api/review", methods=["POST"])
-def add_review():
-    data = request.json
-    if not data or "resource_id" not in data or "rating" not in data:
-        return jsonify({"error": "Invalid data"}), 400
-    review = {
-        "resource_id": data.get("resource_id"),
-        "user_name": data.get("user_name"),
-        "rating": data.get("rating"),
-        "comment": data.get("comment"),
-        "date": data.get("date")
-    }
-    if reviews_col:
-        res = reviews_col.insert_one(review)
-        return jsonify({"message": "Review added", "id": str(res.inserted_id)}), 201
-    return jsonify({"message": "DB not available; simulated add"}), 201
+# --- Reviews: add and list ---
+@app.route("/api/resource/<rid>/reviews", methods=["GET"])
+def get_reviews_for_resource(rid):
+    try:
+        if reviews_col is not None:
+            docs = list(reviews_col.find({"resource_id": rid}))
+            return jsonify([to_json(d) for d in docs]), 200
+        else:
+            out = [r for r in (local_reviews or []) if r.get("resource_id")==rid]
+            return jsonify(out), 200
+    except Exception:
+        logger.exception("get_reviews_for_resource failed")
+        return jsonify({"error":"server"}), 500
 
-@app.route("/api/reviews/<resource_id>", methods=["GET"])
-def get_reviews(resource_id):
-    if reviews_col:
-        docs = list(reviews_col.find({"resource_id": resource_id}))
-        return jsonify([to_json(d) for d in docs]), 200
-    return jsonify([]), 200
+@app.route("/api/resource/<rid>/review", methods=["POST"])
+def add_review_to_resource(rid):
+    try:
+        data = request.json
+        if not data or "rating" not in data:
+            return jsonify({"error":"Invalid data"}), 400
+        review = {
+            "resource_id": rid,
+            "user_name": data.get("user_name"),
+            "rating": float(data.get("rating")),
+            "comment": data.get("comment"),
+            "created_at": time.time()
+        }
+        if reviews_col is not None:
+            res = reviews_col.insert_one(review)
+        else:
+            review["_id"] = str(uuid.uuid4())
+            local_reviews.append(review)
+            save_local(LOCAL_REVIEW_FILE, local_reviews)
 
-@app.route("/api/event", methods=["POST"])
-def add_event():
-    data = request.json
-    if not data or "resource_id" not in data or "title" not in data:
-        return jsonify({"error": "Invalid data"}), 400
-    event = {
-        "resource_id": data.get("resource_id"),
-        "title": data.get("title"),
-        "description": data.get("description"),
-        "date": data.get("date"),
-        "time": data.get("time")
-    }
-    if events_col:
-        res = events_col.insert_one(event)
-        return jsonify({"message": "Event added", "id": str(res.inserted_id)}), 201
-    return jsonify({"message": "DB not available; simulated add"}), 201
+        # Update avg rating on resource (DB or local)
+        try:
+            if reviews_col is not None and resources_col is not None:
+                docs = list(reviews_col.find({"resource_id": rid}))
+                avg = sum([d.get("rating",0) for d in docs]) / max(1, len(docs))
+                resources_col.update_one({"_id": ObjectId(rid)}, {"$set": {"avg_rating": avg}})
+            else:
+                # recalc local
+                rs = [r for r in (local_reviews or []) if r.get("resource_id")==rid]
+                if rs:
+                    avg = sum(r.get("rating",0) for r in rs) / len(rs)
+                else:
+                    avg = None
+                # update resource in local_resources
+                for rsrc in (local_resources or []):
+                    if rsrc.get("_id")==rid:
+                        rsrc["avg_rating"] = avg
+                save_local(LOCAL_RESOURCE_FILE, local_resources)
+        except Exception:
+            logger.exception("Failed updating average rating")
 
-@app.route("/api/events/<resource_id>", methods=["GET"])
-def get_events(resource_id):
-    if events_col:
-        docs = list(events_col.find({"resource_id": resource_id}))
-        return jsonify([to_json(d) for d in docs]), 200
-    return jsonify([]), 200
+        return jsonify({"message":"Review added"}), 201
+    except Exception:
+        logger.exception("add_review_to_resource failed")
+        return jsonify({"error":"server"}), 500
 
+# --- Verify resource (admin-only) ---
+@app.route("/api/resource/<rid>/verify", methods=["POST"])
+def verify_resource(rid):
+    try:
+        token = request.headers.get("X-ADMIN-TOKEN", "")
+        if token != ADMIN_TOKEN:
+            return jsonify({"error":"unauthorized"}), 401
+        if resources_col is not None:
+            resources_col.update_one({"_id": ObjectId(rid)}, {"$set": {"verified": True}})
+            return jsonify({"message":"Resource verified"}), 200
+        else:
+            # local
+            for r in (local_resources or []):
+                if r.get("_id")==rid:
+                    r["verified"] = True
+            save_local(LOCAL_RESOURCE_FILE, local_resources)
+            return jsonify({"message":"Resource verified (local)"}), 200
+    except Exception:
+        logger.exception("verify_resource failed")
+        return jsonify({"error":"server"}), 500
+
+# --- Delete endpoints (optional) ---
 @app.route("/api/resource/<rid>", methods=["DELETE"])
 def delete_resource(rid):
     try:
-        res = resources_col.delete_one({"_id": ObjectId(rid)}) if resources_col else None
+        if resources_col is not None:
+            try:
+                res = resources_col.delete_one({"_id": ObjectId(rid)})
+            except Exception:
+                return jsonify({"error":"Invalid id"}), 400
+            if res.deleted_count:
+                return jsonify({"message":"Deleted"}), 200
+            return jsonify({"error":"Not found"}), 404
+        else:
+            # local
+            before = len(local_resources or [])
+            local_resources[:] = [r for r in (local_resources or []) if r.get("_id")!=rid]
+            save_local(LOCAL_RESOURCE_FILE, local_resources)
+            return jsonify({"message":"Deleted (local)"}), 200
     except Exception:
-        return jsonify({"error": "Invalid id"}), 400
-    if res and res.deleted_count:
-        return jsonify({"message": "Resource deleted"}), 200
-    return jsonify({"error": "Not found"}), 404
+        logger.exception("delete_resource failed")
+        return jsonify({"error":"server"}), 500
 
-@app.route("/api/review/<rid>", methods=["DELETE"])
-def delete_review(rid):
-    try:
-        res = reviews_col.delete_one({"_id": ObjectId(rid)}) if reviews_col else None
-    except Exception:
-        return jsonify({"error": "Invalid id"}), 400
-    if res and res.deleted_count:
-        return jsonify({"message": "Review deleted"}), 200
-    return jsonify({"error": "Not found"}), 404
+
 
 if __name__ == "__main__":
-    app.run(debug=False, port=5000)
+    try:
+        # run simple server
+        app.run(debug=False, use_reloader=False, port=5000)
+    except Exception:
+        logger.exception("app.run raised exception")
+        sys.exit(1)

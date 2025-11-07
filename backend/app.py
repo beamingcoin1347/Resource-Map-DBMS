@@ -11,11 +11,11 @@ app = Flask(__name__, static_folder="../frontend", static_url_path="/")
 CORS(app)
 logger = app.logger
 
-# --- CONFIG ---
+# Connect to Mongo DB
 MONGO_URI =  "mongodb+srv://Shreyan_19:Shreyan19@communityresourcemap.nkvghvk.mongodb.net/?appName=CommunityResourceMap"
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "changeme")  # set in env for real use
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "Admin123")  # set in env for real use
 
-# --- Try connect to MongoDB ---
+# Error handling for mongo connection
 client = None
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
@@ -30,7 +30,7 @@ resources_col = db["resources"] if db is not None else None
 reviews_col = db["reviews"] if db is not None else None
 events_col = db["events"] if db is not None else None
 
-# --- Local fallback storage ---
+#Storage
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 LOCAL_RESOURCE_FILE = os.path.join(DATA_DIR, "resources.json")
